@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+dist/
+fonts/
+sd_card/
+books/
+*.font
+*.idx
+*.prog
+.settings
