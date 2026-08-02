@@ -130,7 +130,7 @@
    LCD CS  ─┤ GP9             GP4 ├─ SD MISO
    LCD A0  ─┤ GP8             GP5 ├─ SD CS
    LCD RST ─┤ GP12                │
-     上 键 ──┤ GP20           GP16 ├── 下 键
+    上 键 ──┤ GP20           GP16 ├── 下 键
             │                GP26 ├── OK 键
             │ 3V3             GND │
             └─────────────────────┘
