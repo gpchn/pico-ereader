@@ -5,11 +5,11 @@ MPY_INT_BITS = 31
 MPY_OPT = -O2
 
 SOURCES = \
-    app.py \
-    lib/uc1701x.py \
-    lib/sdcard.py \
-    lib/menu.py \
-    lib/reader.py
+    src/app.py \
+    src/lib/uc1701x.py \
+    src/lib/sdcard.py \
+    src/lib/menu.py \
+    src/lib/reader.py
 
 TARGETS = \
     dist/app.mpy \
@@ -27,7 +27,7 @@ all: $(TARGETS)
 dist/lib:
 	if not exist dist\lib mkdir dist\lib
 
-dist/%.mpy: %.py | dist/lib
+$(TARGETS): dist/%.mpy: src/%.py | dist/lib
 	$(MPY_CROSS) $(MPY_FLAGS) -o $@ $<
 
 clean:

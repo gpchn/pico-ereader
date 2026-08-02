@@ -3,8 +3,8 @@
 > 屏幕：LCD9648（UC1701x 控制器，**实际分辨率 96×48**）
 > 主控：Raspberry Pi Pico
 > 文本：SD 卡内任意 `.txt`（**仅 UTF-8**）
-> 字库：PC 端 `build_font.py` 预生成，运行时按需查表
-> 索引：PC 端 `build_books.py` 预生成页偏移表 + 文件名映射，开书无需等待
+> 字库：PC 端 `build.py` 预生成，运行时按需查表
+> 索引：PC 端 `build.py` 预生成页偏移表 + 文件名映射，开书无需等待
 
 每页字数：
 
@@ -21,7 +21,7 @@
 2. [物料清单](#2-物料清单)
 3. [硬件接线](#3-硬件接线)
 4. [PC 端准备](#4-pc-端准备)
-5. [生成字库](#5-生成字库)
+5. [生成字库与书籍索引](#5-生成字库与书籍索引)
 6. [生成 SD 卡文件](#6-生成-sd-卡文件)
 7. [SD 卡准备](#7-sd-卡准备)
 8. [烧录 MicroPython 固件](#8-烧录-micropython-固件)
@@ -70,8 +70,8 @@
 
 ```
 ┌──── PC ────────────────────┐
-│  build_font.py             │  → /sd/fonts/*.font
-│  build_books.py            │  → /sd/books/*.txt + *.idx + books.map
+│  build.py（字库+索引一键）  │  → sd_card/fonts/*.font
+│                            │  → sd_card/books/*.txt + *.idx + books.map
 └─────────────────────────────┘
          ↓
 ┌──── SD 卡 ─────────────────┐
@@ -80,7 +80,7 @@
 │  /books/book_0001_32.idx  │  ← 页偏移索引
 │  /books/book_0001_18.idx  │  ← 页偏移索引（16×16 字体用）
 │  /books.map               │  ← book_0001.txt|三国演义
-│  /book_0001.txt.prog      │  ← 阅读进度
+│  /books/book_0001.txt.prog│  ← 阅读进度
 │  /.settings               │  ← 当前字体偏好
 └────────────────────────────┘
          ↑ 读
@@ -210,7 +210,7 @@ pip install Pillow
 
 ---
 
-## 5. 生成字库
+## 5. 生成字库与书籍索引
 
 ### 5.1 打开命令行，进入项目目录
 
@@ -218,11 +218,16 @@ pip install Pillow
 cd 三国演义
 ```
 
-### 5.2 运行生成脚本
+### 5.2 一键构建（字库 + 书籍索引）
 
 ```bash
-python build_font.py
+python build.py
 ```
+
+一次完成三件事：
+1. 生成全部字库（需先 `pip install Pillow`，见 4.2）
+2. 把 `books/` 里的小说重命名为 ASCII 文件名（`book_0001.txt`、`book_0002.txt`…），并为每种字号（12×12 和 16×16）生成 `.idx` 页偏移索引
+3. 生成 `books.map` 元数据文件（记录 ASCII 名←→中文名映射）
 
 会输出类似：
 
@@ -230,24 +235,29 @@ python build_font.py
 [simsun12.font] 字体=C:/Windows/Fonts/simsun.ttc  尺寸=12x12
   字符数: 27983
   渲染: 成功=27983 失败/空白=0
-  写入: fonts\simsun12.font (783548 字节, 765.2 KB)
+  写入: sd_card\fonts\simsun12.font (783548 字节, 765.2 KB)
 ...
-生成完成。共 6 个字体文件，目录：fonts/
+生成完成。共 4 个字体文件，目录：sd_card/fonts/
 ```
 
 生成文件：
 
 ```
-fonts/
+sd_card/fonts/
 ├── simsun12.font   宋体 12×12 (~765KB)
 ├── simsun16.font   宋体 16×16 (~984KB)
-├── simhei12.font   黑体 12×12
-├── simhei16.font   黑体 16×16
-├── simli12.font    隶书 12×12
-└── simli16.font    隶书 16×16
+└── ...             其余取决于本机已安装的字体（文泉驿等）
 ```
 
-### 5.3 字符集说明
+### 5.3 常用参数
+
+| 参数 | 作用 |
+|------|------|
+| `--copy-fonts` | 不重新生成字库，直接复制 `fonts/` 目录下已有成品 |
+| `--no-books` | 只处理字库，跳过书籍 |
+| `--no-fonts` | 只处理书籍，跳过字库 |
+
+### 5.4 字符集说明
 
 字体文件覆盖的字符范围：
 - ASCII 可打印（0x20-0x7E）
@@ -273,32 +283,15 @@ fonts/
     └── 红楼梦.txt
 ```
 
-### 6.2 运行 build_books.py
+### 6.2 输出结构
 
-```bash
-python build_books.py
-```
-
-脚本会：
-1. 把每本小说重命名为 ASCII 文件名（`book_0001.txt`、`book_0002.txt`…）
-2. 为每种字号（12×12 和 16×16）生成 `.idx` 页偏移索引
-3. 生成 `books.map` 元数据文件（记录 ASCII 名←→中文名映射）
-
-输出：
-
-```
-sd_card/books/book_0001.txt ← 三国演义.txt
-sd_card/books/book_0002.txt ← 红楼梦.txt
-
-完成! 共处理 2 本书
-输出目录: sd_card/books/
-元数据:   sd_card/books.map
-```
-
-### 6.3 输出结构
+`python build.py` 全部完成后（见第 5 章），`sd_card/` 目录结构如下：
 
 ```
 sd_card/
+├── fonts/
+│   ├── simsun12.font          ← 字库
+│   └── simsun16.font
 ├── books/
 │   ├── book_0001.txt          ← ASCII 文件名，Pico 无编码问题
 │   ├── book_0001_32.idx       ← 页偏移索引（12×12 字体用）
@@ -386,12 +379,12 @@ SD:/
 
 | PC 端路径 | 拖到 Pico 路径 |
 |----------|---------------|
-| `三国演义\app.py` | `/app.py` |
-| `三国演义\main.py` | `/main.py` |
-| `三国演义\lib\uc1701x.py` | `/lib/uc1701x.py` |
-| `三国演义\lib\sdcard.py` | `/lib/sdcard.py` |
-| `三国演义\lib\menu.py` | `/lib/menu.py` |
-| `三国演义\lib\reader.py` | `/lib/reader.py` |
+| `src\app.py` | `/app.py` |
+| `src\main.py` | `/main.py` |
+| `src\lib\uc1701x.py` | `/lib/uc1701x.py` |
+| `src\lib\sdcard.py` | `/lib/sdcard.py` |
+| `src\lib\menu.py` | `/lib/menu.py` |
+| `src\lib\reader.py` | `/lib/reader.py` |
 
 > `main.py` 只有一行 `__import__('app')`，这是为了兼容 mpy-cross 编译。如果不想用编译，可以直接把 `app.py` 改名为 `main.py`。
 
@@ -514,8 +507,8 @@ SD 卡挂载（1-2 秒）
 每本书的进度保存在：
 
 ```
-/sd/book_0001.txt.prog
-/sd/book_0002.txt.prog
+/sd/books/book_0001.txt.prog
+/sd/books/book_0002.txt.prog
 ```
 
 文件内容就是当前页码（整数）。重启 Pico 时自动恢复。
@@ -527,7 +520,7 @@ SD 卡挂载（1-2 秒）
 ### 12.1 加新书
 
 1. 把 `.txt` 放到 `books/` 目录
-2. 运行 `python build_books.py`
+2. 运行 `python build.py`
 3. 把 `sd_card/` 下的内容拷到 SD 卡
 4. 重启 Pico
 
@@ -567,19 +560,19 @@ SD 卡挂载（1-2 秒）
 
 ### 13.3 菜单显示 "NO BOOKS"
 
-- 运行 `python build_books.py` 生成文件名映射
+- 运行 `python build.py` 生成文件名映射
 - 检查 SD 卡 `/sd/books/` 里是否有 `book_XXXX.txt`
 - 检查 `/sd/books.map` 是否存在
 
 ### 13.4 开书显示 "NO.IDX"
 
-- 运行 `python build_books.py` 重新生成索引
+- 运行 `python build.py` 重新生成索引
 - 确认 `.idx` 文件和书名匹配（`book_0001.txt` ↔ `book_0001_32.idx`）
 
 ### 13.5 进入阅读后字显示为空白 / 方块
 
 - 字库没有该字（生僻字/异体字）
-- 重新生成字库：`python build_font.py`
+- 重新生成字库：`python build.py`
 
 ### 13.6 翻页卡顿
 
@@ -604,30 +597,24 @@ SD 卡挂载（1-2 秒）
 ### 14.1 PC 端项目
 
 ```
-三国演义/                    # 项目根目录
-├── main.py                  # Pico 启动入口（__import__('app')）
-├── app.py                   # 主程序
-├── build_font.py            # PC 端字库生成
-├── build_books.py           # PC 端索引生成 + 文件名转换
-├── 教程.md                  # 本文档
-├── Makefile / build.bat     # mpy-cross 编译
-├── lib/                     # MicroPython 模块
-│   ├── uc1701x.py           # LCD 驱动（96×48）
-│   ├── sdcard.py            # SD 卡驱动
-│   ├── menu.py              # 菜单模块
-│   └── reader.py            # 阅读器模块
-├── fonts/                   # 字库输出
-│   ├── simsun12.font
-│   ├── simsun16.font
-│   └── ...
+电子书/                      # 项目根目录
+├── build.py                 # PC 端一键构建（字库 + 书籍索引）
+├── src/                     # Pico 端源码（用 Thonny 上传）
+│   ├── main.py              # 启动入口（__import__('app')）
+│   ├── app.py               # 主程序
+│   └── lib/                 # MicroPython 模块
+│       ├── uc1701x.py       # LCD 驱动（96×48）
+│       ├── sdcard.py        # SD 卡驱动
+│       ├── menu.py          # 菜单模块
+│       └── reader.py        # 阅读器模块
+├── Makefile                 # mpy-cross 编译（可选）
 ├── books/                   # 放原始 .txt（中文名）
-├── sd_card/                 # build_books.py 输出（拷到 SD 卡）
-│   ├── books/
-│   │   ├── book_0001.txt
-│   │   ├── book_0001_32.idx
-│   │   └── ...
+├── sd_card/                 # build.py 输出（拷到 SD 卡）
+│   ├── fonts/               # 字库
+│   ├── books/               # book_XXXX.txt + .idx
 │   └── books.map
-└── *.txt                    # 也可直接放项目根目录
+├── README.md                # 本文档
+└── AGENTS.md                # 开发者说明
 ```
 
 ### 14.2 Pico 端（烧录后）
@@ -717,7 +704,7 @@ SD:/
 | LRU | Least Recently Used，最近最少使用缓存淘汰 |
 | 页偏移表 | 记录每页起始字节位置的数组，存为 .idx 文件 |
 | 字库 | 字符 → 字模的映射集合 |
-| .font | 字库文件（PC 端 build_font.py 生成） |
-| .idx | 页偏移索引文件（PC 端 build_books.py 生成） |
+| .font | 字库文件（PC 端 build.py 生成） |
+| .idx | 页偏移索引文件（PC 端 build.py 生成） |
 | books.map | 文件名映射表（ASCII名|中文名） |
 | MONO_VLSB | Vertical LSB，UC1701x 的位图存储格式 |
