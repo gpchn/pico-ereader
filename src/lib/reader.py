@@ -2,7 +2,15 @@ import os
 import time
 import struct
 import re
+import machine
 import framebuf
+
+
+def _idle(ms):
+    try:
+        machine.lightsleep(ms)
+    except Exception:
+        time.sleep_ms(ms)
 
 _FONT_CACHE = {}
 _FONT_CACHE_LIMIT = 200
@@ -111,6 +119,7 @@ class Reader:
         self._fb = framebuf.FrameBuffer(self._fb_buf, self.FW, self.FH, framebuf.MONO_VLSB)
 
         self._build_index()
+        self._txt_f = None
         self.page = self._load_progress()
         if self.page >= self.total_pages:
             self.page = 0
@@ -144,6 +153,11 @@ class Reader:
             self._idx_f.close()
             self._idx_f = None
 
+    def _close_txt(self):
+        if self._txt_f is not None:
+            self._txt_f.close()
+            self._txt_f = None
+
     def _progress_path(self):
         return self.txt_path + '.prog'
 
@@ -172,9 +186,11 @@ class Reader:
             return
         n_chars = self.PER_PAGE
         start, end = self._get_page_bounds(page_idx)
-        with open(self.txt_path, 'rb') as f:
-            f.seek(start)
-            raw = _read_exact(f, end - start)
+        if self._txt_f is None:
+            self._txt_f = open(self.txt_path, 'rb')
+        f = self._txt_f
+        f.seek(start)
+        raw = _read_exact(f, end - start)
         text = raw.decode('utf-8', 'ignore')
         text = re.sub(r'[\s\u3000]+', ' ', text)
         chars = text[:n_chars] if len(text) >= n_chars else text
@@ -206,18 +222,47 @@ class Reader:
             self.page = p
             self._show()
 
+    def _poweroff(self):
+        d = self.display
+        d.writeCMD(0x28 | 0x00)
+        d.poweroff()
+
+    def _poweron(self):
+        d = self.display
+        d.writeCMD(0x28 | 0x07)
+        d.poweron()
+        time.sleep_ms(20)
+        self._show()
+
     def run(self):
         DEBOUNCE = 30
         HOLD_MS = 600
+        IDLE_POWEROFF_MS = 120000
+        last_active = time.ticks_ms()
+        sleeping = False
         while True:
             up_pressed = self.btn_up.value() == 0
             dn_pressed = self.btn_down.value() == 0
             ok_pressed = self.btn_ok.value() == 0
+            now = time.ticks_ms()
+            if up_pressed or dn_pressed or ok_pressed:
+                last_active = now
+                sleeping = False
+            if not sleeping and time.ticks_diff(now, last_active) > IDLE_POWEROFF_MS:
+                self._poweroff()
+                sleeping = True
+            if sleeping:
+                if up_pressed or dn_pressed or ok_pressed:
+                    self._poweron()
+                    sleeping = False
+                _idle(50)
+                continue
             if up_pressed:
                 time.sleep_ms(DEBOUNCE)
                 if self.btn_up.value() == 0:
                     self.turn_prev()
                     self._save_progress()
+                    last_active = time.ticks_ms()
                     while self.btn_up.value() == 0:
                         time.sleep_ms(10)
             if dn_pressed:
@@ -225,6 +270,7 @@ class Reader:
                 if self.btn_down.value() == 0:
                     self.turn_next()
                     self._save_progress()
+                    last_active = time.ticks_ms()
                     while self.btn_down.value() == 0:
                         time.sleep_ms(10)
             if ok_pressed:
@@ -241,8 +287,9 @@ class Reader:
                     else:
                         self._save_progress()
                         self._close_idx()
+                        self._close_txt()
                         return 'menu'
-            time.sleep_ms(15)
+            _idle(15)
 
     def _jump_dialog(self):
         DEBOUNCE = 30
@@ -275,4 +322,4 @@ class Reader:
                     return
             if time.ticks_diff(time.ticks_ms(), t_start) > 5000:
                 return
-            time.sleep_ms(15)
+            _idle(15)

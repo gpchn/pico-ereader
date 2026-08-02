@@ -23,6 +23,13 @@ import machine
 sys.path.insert(0, '/')
 sys.path.insert(0, '/lib')
 
+
+def _idle(ms):
+    try:
+        machine.lightsleep(ms)
+    except Exception:
+        time.sleep_ms(ms)
+
 from uc1701x import UC1701x
 from menu import Menu
 from reader import Reader
@@ -109,7 +116,7 @@ def main():
         while True:
             if btn_ok.value() == 0:
                 break
-            time.sleep_ms(50)
+            _idle(50)
     # 主循环
     while True:
         try:
@@ -124,7 +131,7 @@ def main():
                 while True:
                     if btn_up.value() == 0 or btn_dn.value() == 0 or btn_ok.value() == 0:
                         break
-                    time.sleep_ms(50)
+                    _idle(50)
                 # 恢复升压 + 显示
                 display.writeCMD(0x28 | 0x07)
                 display.poweron()

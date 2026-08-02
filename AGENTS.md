@@ -33,3 +33,4 @@ Pico 小说阅读器：MicroPython 电子书阅读器（Raspberry Pi Pico + LCD9
 - SD 挂载带 `encoding='gbk'` 回退（`app.py` `mount_sd()`，SD 驱动 ImportError 时回退 `machine.SDCard`）。**SD 文件名必须 ASCII**：非 ASCII 文件名会让 `os.listdir` 抛 UnicodeError 导致菜单为空；中文名只存在于 `books.map`。书文本必须 UTF-8（build.py 剥 BOM）。
 - 菜单里 ASCII 文本用内置 8px 点阵（`menu.py` `_FONT8_DATA`），中文走当前字库；字体名从 `*.font` 文件名解析（首个连续数字处截断），只认 12/16 两档尺寸。
 - 阅读模式：短按 OK 返回菜单，长按（>600ms）进跳页模式；跳页内长按 OK 取消、5 秒无操作自动退出（`reader.py` `run`/`_jump_dialog`）。
+- 功耗：菜单/阅读循环空闲时用 `machine.lightsleep`（`_idle()`，异常回退 `time.sleep_ms`）；菜单与阅读器 120s 无操作自动熄屏（LCD 升压 `0x28|0x00` + `poweroff`），任意键唤醒重绘——升压关断是最大续航来源。
