@@ -1,17 +1,9 @@
 import os
 import time
-import machine
 import framebuf
 
 SCR_W = 96
 SCR_H = 48
-
-
-def _idle(ms):
-    try:
-        machine.lightsleep(ms)
-    except Exception:
-        time.sleep_ms(ms)
 
 BOOKS_DIR = '/sd/books'
 FONTS_DIR = '/sd/fonts'
@@ -70,22 +62,17 @@ _FONT8_DATA = bytes([
 ])
 
 
-_fb8_buf = bytearray(8)
-_fb8 = framebuf.FrameBuffer(_fb8_buf, 8, 8, framebuf.MONO_VLSB)
-
-
 def _draw_char8(display, ch, x, y, color=1):
     o = (ord(ch) - 0x20) * 8
     if o < 0 or o + 8 > len(_FONT8_DATA):
         return
-    for c in range(8):
-        v = 0
-        mask = 0x80 >> c
-        for r in range(8):
-            if _FONT8_DATA[o + r] & mask:
-                v |= 1 << r
-        _fb8_buf[c] = v if color else v ^ 0xFF
-    display.blit(_fb8, x, y, 0 if color else 1)
+    for row in range(8):
+        b = _FONT8_DATA[o + row]
+        if b == 0:
+            continue
+        for col in range(8):
+            if b & (0x80 >> col):
+                display.pixel(x + col, y + row, color)
 
 
 def _draw_text8(display, s, x, y, color=1):
@@ -339,30 +326,11 @@ class Menu:
                         self.font_name, self.font_size = self.fonts[idx]
                         _save_settings(self.font_name, self.font_size)
                         return
-                _idle(15)
+                time.sleep_ms(15)
 
     def run(self):
         DEBOUNCE = 30
-        IDLE_POWEROFF_MS = 120000
-        last_active = time.ticks_ms()
-        sleeping = False
         while True:
-            if self.btn_up.value() == 0 or self.btn_down.value() == 0 or self.btn_ok.value() == 0:
-                last_active = time.ticks_ms()
-                sleeping = False
-            now = time.ticks_ms()
-            if not sleeping and time.ticks_diff(now, last_active) > IDLE_POWEROFF_MS:
-                self.display.writeCMD(0x28 | 0x00)
-                self.display.poweroff()
-                sleeping = True
-            if sleeping:
-                if self.btn_up.value() == 0 or self.btn_down.value() == 0 or self.btn_ok.value() == 0:
-                    self.display.writeCMD(0x28 | 0x07)
-                    self.display.poweron()
-                    self._show()
-                    sleeping = False
-                _idle(50)
-                continue
             if self.btn_up.value() == 0:
                 time.sleep_ms(DEBOUNCE)
                 if self.btn_up.value() == 0:
@@ -390,4 +358,4 @@ class Menu:
                             self._items[self.sel]['path'],
                             '%s/%s%d.font' % (FONTS_DIR, self.font_name, self.font_size),
                         )
-            _idle(15)
+            time.sleep_ms(15)
