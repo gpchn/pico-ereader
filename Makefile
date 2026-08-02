@@ -1,8 +1,6 @@
 SHELL = cmd.exe
 MPY_CROSS = mpy-cross
-MPY_ARCH = armv6m
-MPY_INT_BITS = 31
-MPY_OPT = -O2
+MPY_FLAGS = -O2
 
 SOURCES = \
     src/app.py \
@@ -17,8 +15,6 @@ TARGETS = \
     dist/lib/sdcard.mpy \
     dist/lib/menu.mpy \
     dist/lib/reader.mpy
-
-MPY_FLAGS = -march=$(MPY_ARCH) -msmall-int-bits=$(MPY_INT_BITS) $(MPY_OPT)
 
 .PHONY: all clean
 
