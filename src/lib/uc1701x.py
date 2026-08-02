@@ -65,6 +65,7 @@ class UC1701x:
         import time
         self._cmd(_SYS_SOFT_RST)
         time.sleep_ms(10)
+        self._cmd(_SET_SCROLL_LINE | 0)
         self._cmd(_BIAS_RATIO)
         self._cmd(_SET_SEG_DIR | (1 if invX else 0))
         self._cmd(_SET_COM_DIR | (8 if invY else 0))
@@ -79,6 +80,9 @@ class UC1701x:
         time.sleep_ms(100)
         self.fill(0)
         self.show()
+        for page in range(9):
+            self._set_pos(0, page)
+            self._data(bytes(132))
 
     def _set_pos(self, col=0, page=0):
         self._cmd(_SET_COLADD_L | (col & 0x0F))
@@ -104,16 +108,19 @@ class UC1701x:
         self.fb.blit(source, x, y, key)
 
     def show(self):
+        self._cmd(_SET_SCROLL_LINE | 0)
         pages = self.height // 8
         col_start = (128 - self.width) // 2
+        padding = bytes(4)
         for p in range(pages):
             self._set_pos(col_start, p)
-            self._data(self.buffer[p * self.width:(p + 1) * self.width])
+            self._data(self.buffer[p * self.width:(p + 1) * self.width] + padding)
 
     def poweroff(self):
         self._cmd(_SET_ENA_DISP | 0)
 
     def poweron(self):
+        self._cmd(_SET_SCROLL_LINE | 0)
         self._cmd(_SET_ENA_DISP | 1)
 
     def writeCMD(self, cmd):
