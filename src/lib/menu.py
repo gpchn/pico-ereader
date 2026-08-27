@@ -210,7 +210,7 @@ def _load_settings():
                 parts = line.split(',')
                 if len(parts) == 2:
                     return (parts[0], int(parts[1]))
-    except:
+    except Exception:
         pass
     return None
 
@@ -219,8 +219,105 @@ def _save_settings(name, size):
     try:
         with open(SETTINGS_FILE, 'w') as f:
             f.write('%s,%d' % (name, size))
-    except:
+    except Exception:
         pass
+
+
+def font_path(name, size):
+    return '%s/%s%d.font' % (FONTS_DIR, name, size)
+
+
+def _preferred_font(fonts):
+    """给出一组可用字体 (name,size) 时的默认选择：
+    优先 simsun / simyou 的 12、16 档（与电子书回退优先级一致），
+    都没有才回退到列表首项；空列表返回 None。"""
+    if not fonts:
+        return None
+    for f in (('simsun', 12), ('simsun', 16), ('simyou', 12), ('simyou', 16)):
+        if f in fonts:
+            return f
+    return fonts[0]
+
+
+def current_font_path():
+    """返回当前字体对应的 .font 路径（无设置或默认 simsun,12 缺失时，回退到任一可用字体，
+    绝不返回一个不存在的文件，避免 vocab 初始化字库时报错卡死）。"""
+    fonts = list_fonts()
+    s = _load_settings()
+    if s and s in fonts:
+        name, size = s
+    else:
+        pick = _preferred_font(fonts)
+        if pick is None:
+            # 没有任何字库：返回 None，由调用方决定降级（如仅显示 8px 点阵）
+            return None
+        name, size = pick
+    return font_path(name, size)
+
+
+def pick_font(display, btn_up, btn_down, btn_ok):
+    """弹出字体选择器，选定后写入 .settings，返回 (name, size)。"""
+    fonts = list_fonts()
+    if not fonts:
+        return None
+    idx = -1
+    cur = _load_settings()
+    for i, f in enumerate(fonts):
+        if cur and cur == f:
+            idx = i
+            break
+    if idx < 0:
+        # 无有效设置时默认停在 simsun（与 Menu/current_font_path 默认一致），
+        # 不取 fonts[0]，否则首次打开选择器会把 simhei 高亮成「默认」。
+        idx = 0
+        for i, f in enumerate(fonts):
+            if f[0] == 'simsun':
+                idx = i
+                break
+    d = display
+    while btn_ok.value() == 0:
+        time.sleep_ms(10)
+    time.sleep_ms(50)
+    row_h = 14
+    rows = 3
+    y0 = 2
+    while True:
+        d.fill(0)
+        for i in range(rows):
+            fi = (idx // rows) * rows + i
+            if fi >= len(fonts):
+                break
+            y = y0 + i * row_h
+            if fi == idx:
+                d.fill_rect(0, y, SCR_W, row_h, 1)
+                color = 0
+            else:
+                color = 1
+            _draw_text8(d, '%s%d' % fonts[fi], 8, y + (row_h - 8) // 2, color)
+        d.show()
+        while True:
+            if btn_up.value() == 0:
+                time.sleep_ms(30)
+                if btn_up.value() == 0:
+                    idx = (idx - 1) % len(fonts)
+                    while btn_up.value() == 0:
+                        time.sleep_ms(10)
+                    break
+            if btn_down.value() == 0:
+                time.sleep_ms(30)
+                if btn_down.value() == 0:
+                    idx = (idx + 1) % len(fonts)
+                    while btn_down.value() == 0:
+                        time.sleep_ms(10)
+                    break
+            if btn_ok.value() == 0:
+                time.sleep_ms(30)
+                if btn_ok.value() == 0:
+                    while btn_ok.value() == 0:
+                        time.sleep_ms(10)
+                    _save_settings(fonts[idx][0], fonts[idx][1])
+                    return fonts[idx]
+            time.sleep_ms(15)
 
 
 class Menu:
@@ -234,19 +331,36 @@ class Menu:
         s = _load_settings()
         if s and s in self.fonts:
             self.font_name, self.font_size = s
-        elif self.fonts:
-            self.font_name, self.font_size = self.fonts[0]
         else:
-            self.font_name, self.font_size = 'simsun', 12
+            # 与 current_font_path() 保持一致：无有效设置时固定回退 simsun,12（缺失则回退
+            # 任一可用字体），不取 fonts[0]，否则 os.listdir/排序把残留的 simhei 排到最前
+            # 会导致电子书被强制成黑体。
+            pick = _preferred_font(self.fonts)
+            if pick is None:
+                self.font_name, self.font_size = 'simsun', 12
+            else:
+                self.font_name, self.font_size = pick
         self._items = []
         for path, display in self.books:
             self._items.append({'type': 'book', 'path': path, 'name': display})
-        self._items.append({'type': 'font'})
         self.sel = 0
         self._show()
 
     def _font_path(self):
         return '%s/%s%d.font' % (FONTS_DIR, self.font_name, self.font_size)
+
+    def _drain_input(self, timeout_ms=5000):
+        """进入菜单前等待所有按键松开，避免把来自上一层（如阅读长按退出）的残键
+        误判为本菜单操作。__init__ 已绘制首帧，等待期间书架保持可见且不响应。
+        超时必须给足：阅读长按「上」退出时键仍被按住，用户往往要再过一两秒、
+        看到书架后才松手，超时过短会让书架把这句还没松开的「上」判成新长按，
+        一次长按直接穿两级退回主页。5s 兜底按键卡死的情况。"""
+        start = time.ticks_ms()
+        while (self.btn_up.value() == 0 or self.btn_down.value() == 0
+               or self.btn_ok.value() == 0):
+            if time.ticks_diff(time.ticks_ms(), start) >= timeout_ms:
+                break  # 超时兜底（按键卡死时不再阻塞，交给后续逻辑）
+            time.sleep_ms(10)
 
     def _show(self):
         d = self.display
@@ -266,79 +380,35 @@ class Menu:
             else:
                 color = 1
             if item['type'] == 'book':
-                _draw_text8(d, '%d.' % (idx + 1), 0, y + (row_h - 8) // 2, color)
-                _draw_text_mixed(d, item['name'], 16, y, row_h, color, font_path)
-            elif item['type'] == 'font':
-                _draw_text_mixed(d, '>切换字体', 0, y, row_h, color, font_path)
+                _draw_text_mixed(d, item['name'], 0, y, row_h, color, font_path)
+        if not self._items:
+            _draw_text8(d, 'NO BOOKS', (SCR_W - 8 * 8) // 2, 20, 1)
         d.show()
-
-    def _show_font_picker(self):
-        if not self.fonts:
-            return
-        idx = -1
-        for i, f in enumerate(self.fonts):
-            if f == (self.font_name, self.font_size):
-                idx = i
-                break
-        if idx < 0:
-            idx = 0
-        d = self.display
-        while self.btn_ok.value() == 0:
-            time.sleep_ms(10)
-        time.sleep_ms(50)
-        row_h = 14
-        rows = 3
-        y0 = 2
-        while True:
-            d.fill(0)
-            for i in range(rows):
-                fi = (idx // rows) * rows + i
-                if fi >= len(self.fonts):
-                    break
-                y = y0 + i * row_h
-                if fi == idx:
-                    d.fill_rect(0, y, SCR_W, row_h, 1)
-                    color = 0
-                else:
-                    color = 1
-                _draw_text8(d, '%s%d' % self.fonts[fi], 8, y + (row_h - 8) // 2, color)
-            d.show()
-            while True:
-                if self.btn_up.value() == 0:
-                    time.sleep_ms(30)
-                    if self.btn_up.value() == 0:
-                        idx = (idx - 1) % len(self.fonts)
-                        while self.btn_up.value() == 0:
-                            time.sleep_ms(10)
-                        break
-                if self.btn_down.value() == 0:
-                    time.sleep_ms(30)
-                    if self.btn_down.value() == 0:
-                        idx = (idx + 1) % len(self.fonts)
-                        while self.btn_down.value() == 0:
-                            time.sleep_ms(10)
-                        break
-                if self.btn_ok.value() == 0:
-                    time.sleep_ms(30)
-                    if self.btn_ok.value() == 0:
-                        while self.btn_ok.value() == 0:
-                            time.sleep_ms(10)
-                        self.font_name, self.font_size = self.fonts[idx]
-                        _save_settings(self.font_name, self.font_size)
-                        return
-                time.sleep_ms(15)
 
     def run(self):
         DEBOUNCE = 30
+        HOLD_MS = 400
+        # 进入书架时可能残留上一步的持键（如刚长按「上」退出阅读、或点选子菜单后未松手）：
+        # 先等按键松开再处理，避免把上一步的持键误判成本菜单操作（否则刚进书架就被
+        # 那句还没松开的「上」判成长按而立刻返回主页）。带超时兜底，防按键卡死。
+        self._drain_input()
         while True:
             if self.btn_up.value() == 0:
                 time.sleep_ms(DEBOUNCE)
                 if self.btn_up.value() == 0:
+                    start = time.ticks_ms()
+                    long = False
+                    while self.btn_up.value() == 0:
+                        if time.ticks_diff(time.ticks_ms(), start) >= HOLD_MS:
+                            long = True
+                            break  # 达到长按时长立即退出，不等松开（与 Input IRQ 行为一致）
+                        time.sleep_ms(10)
+                    if long:
+                        # 长按「上」：返回上一级（主页）
+                        return None
                     if self.sel > 0:
                         self.sel -= 1
                         self._show()
-                    while self.btn_up.value() == 0:
-                        time.sleep_ms(10)
             if self.btn_down.value() == 0:
                 time.sleep_ms(DEBOUNCE)
                 if self.btn_down.value() == 0:
@@ -350,10 +420,7 @@ class Menu:
             if self.btn_ok.value() == 0:
                 time.sleep_ms(DEBOUNCE)
                 if self.btn_ok.value() == 0:
-                    if self._items[self.sel]['type'] == 'font':
-                        self._show_font_picker()
-                        self._show()
-                    elif self.books:
+                    if self.books:
                         return (
                             self._items[self.sel]['path'],
                             '%s/%s%d.font' % (FONTS_DIR, self.font_name, self.font_size),

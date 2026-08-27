@@ -42,13 +42,17 @@ class UC1701x:
             time.sleep_ms(100)
         self.buffer = bytearray(width * height // 8)
         self.fb = framebuf.FrameBuffer(self.buffer, width, height, framebuf.MONO_VLSB)
+        self._cmdbuf = bytearray(1)
         self.init(roughContrast, fineContrast, invX, invY, invDISP)
 
     def _cmd(self, cmd):
+        # 复用单字节命令缓冲，避免每次发命令都分配 bytearray
+        buf = self._cmdbuf
+        buf[0] = cmd
         self.a0(0)
         if self.existCS:
             self.cs(0)
-        self.spi.write(bytearray([cmd]))
+        self.spi.write(buf)
         if self.existCS:
             self.cs(1)
 
@@ -80,9 +84,12 @@ class UC1701x:
         time.sleep_ms(100)
         self.fill(0)
         self.show()
+        # 整块清 9 页 × 132 列（控制器 RAM 是 132×65，只写 128×8 会留脏列/行，
+        # 屏顶会显示固定内容，勿精简成 pages*128）
+        zeros = bytes(132)
         for page in range(9):
             self._set_pos(0, page)
-            self._data(bytes(132))
+            self._data(zeros)
 
     def _set_pos(self, col=0, page=0):
         self._cmd(_SET_COLADD_L | (col & 0x0F))

@@ -7,14 +7,16 @@ SOURCES = \
     src/lib/uc1701x.py \
     src/lib/sdcard.py \
     src/lib/menu.py \
-    src/lib/reader.py
+    src/lib/reader.py \
+    src/lib/vocab.py
 
 TARGETS = \
     dist/app.mpy \
     dist/lib/uc1701x.mpy \
     dist/lib/sdcard.mpy \
     dist/lib/menu.mpy \
-    dist/lib/reader.mpy
+    dist/lib/reader.mpy \
+    dist/lib/vocab.mpy
 
 .PHONY: all clean
 

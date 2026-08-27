@@ -2,7 +2,10 @@ __pycache__/
 *.pyc
 dist/
 sd_card/
+sdcard/
 books/
+ECDICT/
+_probe*.py
 *.font
 *.idx
 *.prog
