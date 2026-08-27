@@ -67,6 +67,21 @@ def _mtime(p):
         return 0
 
 
+def _font_covers_all_fingerprint(font_path):
+    """校验既有 .font 的字符数与当前 gen_codepoints() 一致（即区间没有演进）。
+
+    只读 header 的 num_chars（偏移 4 起 4 字节小端 u32），不需整读字库。
+    字符数不同说明区间被增删过，返回 False 触发重建。
+    """
+    try:
+        with open(font_path, 'rb') as f:
+            f.read(4)                                   # magic 'FNxx'
+            num_chars = struct.unpack('<I', f.read(4))[0]
+    except OSError:
+        return False
+    return num_chars == len(gen_codepoints())
+
+
 # ==========================================================================
 # 字库（原 build.py）
 # ==========================================================================
@@ -138,42 +153,75 @@ def build_one(name, font_path, size, out_dir, force):
     FB = (FW + 7) // 8 * FH
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{name}{size}.font")
-    # 增量：源字体未变化则跳过
+    # 增量：源字体未变化，且字库覆盖的码点区间也一致时跳过。
+    # 只看 mtime 不够：若在 PHON_RANGES/gen_codepoints 里新增了区间（如补 IPA 音标），
+    # 而源字体文件时间戳没变，会静默沿用旧的 .font，导致新字符在设备端渲染空白。
+    # 故把当前区间的字符数指纹也纳入判断——指纹不同则强制重建。
     if not force and os.path.exists(out_path) and _mtime(font_path) <= _mtime(out_path):
-        print(f"  [跳过] {os.path.basename(out_path)} (字体未变)")
-        return
+        if _font_covers_all_fingerprint(out_path):
+            print(f"  [跳过] {os.path.basename(out_path)} (字体未变，区间一致)")
+            return
 
     from PIL import ImageFont
     font = ImageFont.truetype(font_path, size)
-    # 备选字体：主字体缺失音标/外文字形（如 simsun 无 IPA）时回退渲染，
-    # 保证任一字体都能显示音标。取本机第一个能用的 IPA 覆盖字体。
-    fallback = None
-    for fb_path in (r"C:/Windows/Fonts/simhei.ttf", r"C:/Windows/Fonts/msyh.ttc"):
-        if os.path.exists(fb_path):
-            try:
-                fallback = ImageFont.truetype(fb_path, size)
-                break
-            except Exception:
-                fallback = None
     codepoints = gen_codepoints()
     print(f"\n[{os.path.basename(out_path)}] 字体={font_path}  尺寸={FW}x{FH}")
 
+    blank = bytes(FB)
+
+    # 回退字体链：中文主字体（simsun/simhei/msyh 等）普遍缺 IPA/希腊扩展字形，
+    # 且 PIL 对缺失字符渲染 .notdef「豆腐框」——textbbox 非空、位图非全零，
+    # 用「位图==空白」根本检测不到缺失，豆腐框会被当有效字形写进字库（历史 bug）。
+    # 故先用两个 PUA 哨兵字符取各字体的 .notdef 样本位图，渲染结果与样本一致即视为缺失；
+    # 西文字体（Arial/Segoe UI 等）才有真 IPA 字形，逐个回退直到拿到真字形。
+    FALLBACK_PATHS = (
+        r"C:/Windows/Fonts/arial.ttf",
+        r"C:/Windows/Fonts/segoeui.ttf",
+        r"C:/Windows/Fonts/tahoma.ttf",
+        r"C:/Windows/Fonts/times.ttf",
+        r"C:/Windows/Fonts/DejaVuSans.ttf",
+    )
+
+    def notdef_sample(f):
+        # 两个不同 PUA 字符渲染一致 → 即该字体对缺失字符的固定渲染（豆腐框或空白）
+        a = render_to_vlsb(f, "\ue123", FW, FH)
+        b = render_to_vlsb(f, "\uf8ab", FW, FH)
+        return a if a == b else None
+
+    main_nd = notdef_sample(font)
+    fb_chain = []
+    for p in FALLBACK_PATHS:
+        if os.path.exists(p):
+            try:
+                fb_chain.append((ImageFont.truetype(p, size), notdef_sample(ImageFont.truetype(p, size))))
+            except Exception:
+                pass
+
     bitmaps = bytearray()
     rendered = 0
+    fell_back = 0
     skipped = 0
-    blank = bytes(FB)
     for cp in codepoints:
         ch = chr(cp)
         try:
             bm = render_to_vlsb(font, ch, FW, FH)
-            if fallback is not None and bm == blank:
-                bm = render_to_vlsb(fallback, ch, FW, FH)
+            if bm == blank or (main_nd is not None and bm == main_nd):
+                # 主字体缺失（空白或豆腐框）→ 沿回退链找真字形
+                for f, nd in fb_chain:
+                    bm2 = render_to_vlsb(f, ch, FW, FH)
+                    if bm2 != blank and (nd is None or bm2 != nd):
+                        bm = bm2
+                        fell_back += 1
+                        break
+                else:
+                    bm = blank
+                    skipped += 1
             bitmaps += bm
             rendered += 1
         except Exception:
             skipped += 1
             bitmaps += blank
-    print(f"  渲染: 成功={rendered} 失败/空白={skipped}")
+    print(f"  渲染: 成功={rendered}（回退补字={fell_back}） 缺字形留空={skipped}")
 
     num_chars = len(codepoints)
     index_size = num_chars * 4
@@ -409,6 +457,22 @@ FORM_LABEL = {
 # 设备端翻译显示上限：过长释义既显示不下也会让翻页器切分出行列表撑爆 RAM
 MAX_TRANS = 512
 
+# ECDICT 源数据把个别 IPA 音素误编码成私有使用区(PUA, U+E000 区)字符，例如把
+# /ɪ/ 写成 U+E143（常见于 amphitheatres/aperitifs/awning 等）。字库覆盖区间
+# （PHON_RANGES）只有真实 IPA codepoint，不含 PUA，设备端会渲染成空白。
+# 构建时映射回字库已覆盖的真实字符即可，无需重建字库。
+PUA_PHON_FIX = {
+    "\ue143": "\u026a",  # U+E143 -> /ɪ/
+}
+
+
+def fix_pua_phonetic(s):
+    if not s:
+        return s
+    for k, v in PUA_PHON_FIX.items():
+        s = s.replace(k, v)
+    return s
+
 
 def clean_text(s):
     if not s:
@@ -474,7 +538,7 @@ def collect(csv_path, use_freq):
             if wl in records:
                 continue
             records[wl] = {
-                "phonetic": clean_text(row.get("phonetic")),
+                "phonetic": fix_pua_phonetic(clean_text(row.get("phonetic"))),
                 "translation": clean_text(row.get("translation")),
                 "forms": parse_exchange(row.get("exchange")),
                 "frq": frq,
