@@ -804,9 +804,10 @@ def _show_help(display, inp, font_path):
         "上长按 返回\n"
         "\n"
         "单词卡\n"
-        "上下短 认不认识\n"
+        "上短 不认识\n"
+        "下短 认识\n"
         "上长按 返回\n"
-        "OK短 切换正背面\n"
+        "OK短 正背面\n"
         "OK长 加删生词\n"
         "\n"
         "查看进度\n"
@@ -814,7 +815,7 @@ def _show_help(display, inp, font_path):
         "\n"
         "电子书\n"
         "上下 翻页\n"
-        "上长按 退出\n"
+        "上长按 回书架\n"
         "下长按 自动读\n"
         "OK短 书签\n"
         "OK长 加删书签\n"
@@ -823,6 +824,9 @@ def _show_help(display, inp, font_path):
         "上下 选择\n"
         "OK 跳页\n"
         "上长按 返回\n"
+        "\n"
+        "书架\n"
+        "上长按 回主页\n"
     )
     pager = Pager(display, font_path)
     pager.set_text(text)
@@ -1020,16 +1024,17 @@ def _fisher_yates(a):
 
 
 def _build_order(deck, shuffle):
-    # 顺序背用 range（不占内存）；乱序背只取到期词并洗牌。
-    # 到期下标用 array('i') 而非 list：MicroPython 的 list 里每个 int 都是独立
+    # 顺序背用 range（不占内存）；乱序背对整副牌组洗牌（不预先过滤到期词）。
+    # 到期词的过滤统一交给 _study 主循环的 is_due 跳过：乱序背因此与顺序背
+    # 一样只学到期词，但顺序覆盖全牌组随机（而非到期词之间随机）。
+    # 下标用 array('i') 而非 list：MicroPython 的 list 里每个 int 都是独立
     # 堆对象，gre 等大牌组（7500+ 词）会一次吃掉 ~90KB 触发 MemoryError；
     # array 按 4 字节原生存储，同样数据只要 ~30KB。
     if shuffle:
         from array import array
         order = array('i')
         for i in range(deck.M):
-            if deck.is_due(i):
-                order.append(i)
+            order.append(i)
         _fisher_yates(order)
         return order
     return range(deck.M)
@@ -1047,11 +1052,13 @@ def _study(display, inp, dic, name, font_path, shuffle=False):
         pos = 0
         exited = False  # 长按「上」退出/删空生词本时不显示「本组完成」
         revealed = False  # False=正面(单词)，True=背面(单词+释义)
+        seen_due = False  # 是否遇到过到期词（决定结束提示：本组完成 / 暂无到期词）
         while pos < len(order):
             i = order[pos]
             if not deck.is_due(i):
                 pos += 1
                 continue
+            seen_due = True
             # 单词卡正背面按键一致：
             #   上短=不认识  下短=认识  上长=返回
             #   OK短=切换正背面  OK长=加删生词本
@@ -1089,7 +1096,7 @@ def _study(display, inp, dic, name, font_path, shuffle=False):
                 exited = True
                 break
         if not exited:
-            _show_msg(display, "暂无到期词" if shuffle and len(order) == 0 else "本组完成")
+            _show_msg(display, "本组完成" if seen_due else "暂无到期词")
             time.sleep_ms(1500)
     finally:
         deck.close()
